@@ -19,6 +19,7 @@
 #include <array>
 #include "midi_info.h"
 #include <charconv>
+#include <stdio.h> // fdsan_create_owner_tag, FDSAN_OWNER_TYPE_* (musl)
 #include <system_error>
 
 namespace OHOS {
