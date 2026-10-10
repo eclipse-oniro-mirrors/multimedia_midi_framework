@@ -128,16 +128,18 @@ public:
 
     int Get() const { return fd_; }
     bool Valid() const { return fd_ >= 0; }
-    // Reset takes a newly created fd and binds this object's fdsan owner tag
-    // to it immediately, so that a later close matches the fd's declared owner.
+    // Reset takes a newly created fd (owner tag 0) and binds this object's fdsan
+    // owner tag to it. Precondition: fd must not already be owned by another
+    // UniqueFd (e.g. from its Get()), or the exchange triggers an fdsan error.
     void Reset(int fd = -1);
-    // Detach the fdsan owner tag from the underlying fd without closing it.
-    // Used when the raw fd is transferred elsewhere (e.g. duplicated and handed
-    // to another component/process), where the receiver will close it directly.
-    int RemoveTag();
 
 private:
-    uint64_t Tag() const { return reinterpret_cast<uint64_t>(this); }
+    // Object address packed with the unique_fd owner type, so fdsan reports show
+    // "unique_fd" instead of "unknown type" for a raw address tag.
+    uint64_t Tag() const
+    {
+        return fdsan_create_owner_tag(FDSAN_OWNER_TYPE_UNIQUE_FD, reinterpret_cast<uint64_t>(this));
+    }
 
     int fd_ = -1;
 };
