@@ -224,16 +224,5 @@ void UniqueFd::Reset(int fd)
         fdsan_exchange_owner_tag(fd_, 0, Tag());
     }
 }
-
-int UniqueFd::RemoveTag()
-{
-    if (fd_ < 0) {
-        return -1;
-    }
-    fdsan_exchange_owner_tag(fd_, Tag(), 0);
-    int fd = fd_;
-    fd_ = -1;
-    return fd;
-}
 } // namespace MIDI
 } // namespace OHOS
