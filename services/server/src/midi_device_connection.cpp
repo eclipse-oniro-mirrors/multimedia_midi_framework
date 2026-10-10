@@ -302,7 +302,7 @@ int32_t DeviceConnectionForOutput::InitEpollAndFds()
         notifyEventFd_.Reset(-1);
         return OH_MIDI_STATUS_SYSTEM_ERROR;
     }
-    timerFd_.Reset(tfd, fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, LOG_DOMAIN));
+    timerFd_.Reset(tfd);
 
     int epfd = ::epoll_create1(EPOLL_CLOEXEC);
     if (epfd < 0) {
@@ -310,7 +310,7 @@ int32_t DeviceConnectionForOutput::InitEpollAndFds()
         notifyEventFd_.Reset(-1);
         return OH_MIDI_STATUS_SYSTEM_ERROR;
     }
-    epollFd_.Reset(epfd, fdsan_create_owner_tag(FDSAN_OWNER_TYPE_FILE, LOG_DOMAIN));
+    epollFd_.Reset(epfd);
 
     epoll_event evNotify{};
     evNotify.events = EPOLLIN;

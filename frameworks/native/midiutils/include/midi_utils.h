@@ -117,8 +117,7 @@ public:
 class UniqueFd {
 public:
     UniqueFd() = default;
-    explicit UniqueFd(int fd) : fd_(fd) {}
-    explicit UniqueFd(int fd, uint64_t tag) : fd_(fd), tag_(tag) {}
+    explicit UniqueFd(int fd);
     ~UniqueFd();
 
     UniqueFd(const UniqueFd &) = delete;
@@ -129,13 +128,18 @@ public:
 
     int Get() const { return fd_; }
     bool Valid() const { return fd_ >= 0; }
-    // Reset takes a newly created fd. If tag is non-zero, the fd will be closed
-    // via fdsan_close_with_tag using this tag for open/close ownership checking.
-    void Reset(int fd = -1, uint64_t tag = 0);
+    // Reset takes a newly created fd and binds this object's fdsan owner tag
+    // to it immediately, so that a later close matches the fd's declared owner.
+    void Reset(int fd = -1);
+    // Detach the fdsan owner tag from the underlying fd without closing it.
+    // Used when the raw fd is transferred elsewhere (e.g. duplicated and handed
+    // to another component/process), where the receiver will close it directly.
+    int RemoveTag();
 
 private:
+    uint64_t Tag() const { return reinterpret_cast<uint64_t>(this); }
+
     int fd_ = -1;
-    uint64_t tag_ = 0;
 };
 
 template <typename T>
