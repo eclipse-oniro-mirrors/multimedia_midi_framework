@@ -176,6 +176,11 @@ std::array<uint32_t, SYSEX7_WORD_COUNT> PackSysEx7Ump64(uint8_t group, uint8_t s
 }
 
 // ====== UniqueFd ======
+UniqueFd::UniqueFd(int fd)
+{
+    Reset(fd);
+}
+
 UniqueFd::~UniqueFd()
 {
     Reset();
@@ -184,9 +189,12 @@ UniqueFd::~UniqueFd()
 UniqueFd::UniqueFd(UniqueFd &&other) noexcept
 {
     fd_ = other.fd_;
-    tag_ = other.tag_;
     other.fd_ = -1;
-    other.tag_ = 0;
+    if (fd_ >= 0) {
+        // The fd's fdsan owner is still the source object's tag after the move;
+        // rebind it to this object so a later close matches the declared owner.
+        fdsan_exchange_owner_tag(fd_, other.Tag(), Tag());
+    }
 }
 
 UniqueFd &UniqueFd::operator=(UniqueFd &&other) noexcept
@@ -194,29 +202,26 @@ UniqueFd &UniqueFd::operator=(UniqueFd &&other) noexcept
     if (this != &other) {
         Reset();
         fd_ = other.fd_;
-        tag_ = other.tag_;
         other.fd_ = -1;
-        other.tag_ = 0;
+        if (fd_ >= 0) {
+            fdsan_exchange_owner_tag(fd_, other.Tag(), Tag());
+        }
     }
     return *this;
 }
 
-void UniqueFd::Reset(int fd, uint64_t tag)
+void UniqueFd::Reset(int fd)
 {
     if (fd_ >= 0) {
-        if (tag_ != 0) {
-            fdsan_close_with_tag(fd_, tag_);
-        } else {
-            ::close(fd_);
-        }
+        fdsan_close_with_tag(fd_, Tag());
+        fd_ = -1;
     }
-    fd_ = fd;
-    tag_ = tag;
-    // Bind the owner tag to the newly adopted fd immediately (if it should be tracked),
-    // restoring the fd's owner from the default 0 to tag, so that a later
-    // fdsan_close_with_tag(fd, tag) matches the fd's declared owner.
-    if (fd_ >= 0 && tag_ != 0) {
-        fdsan_exchange_owner_tag(fd_, 0, tag_);
+    if (fd >= 0) {
+        fd_ = fd;
+        // Bind this object's owner tag to the newly adopted fd immediately,
+        // restoring the fd's owner from the default 0 to Tag(), so that a later
+        // fdsan_close_with_tag(fd, Tag()) matches the fd's declared owner.
+        fdsan_exchange_owner_tag(fd_, 0, Tag());
     }
 }
 } // namespace MIDI
