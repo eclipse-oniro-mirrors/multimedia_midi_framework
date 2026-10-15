@@ -23,6 +23,7 @@
 #include "midi_log.h"
 #include "midi_utils.h"
 #include "concurrent_task_client.h"
+#include "cJSON.h"
 
 namespace OHOS {
 namespace MIDI {
