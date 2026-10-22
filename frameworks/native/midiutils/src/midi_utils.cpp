@@ -65,7 +65,7 @@ void CloseFd(int fd)
         MIDI_WARNING_LOG("special fd: %{public}d will be closed", fd);
     }
     int tmpFd = fd;
-    close(fd);
+    UniqueFd fdGuard(fd);   // 接管,析构走 fdsan_close_with_tag
     MIDI_DEBUG_LOG("fd: %{public}d closed successfuly!", tmpFd);
 }
 

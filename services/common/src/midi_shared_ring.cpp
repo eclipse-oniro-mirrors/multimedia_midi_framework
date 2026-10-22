@@ -108,7 +108,7 @@ public:
     ~ScopedFd()
     {
         if (fd_ > MINFD) {
-            CloseFd(fd_);
+            UniqueFd fdGuard(fd_);   // 接管,析构走 fdsan_close_with_tag
         }
     }
 
@@ -184,7 +184,7 @@ void MidiSharedMemoryImpl::Close()
     }
 
     if (fd_ >= 0) {
-        (void)CloseFd(fd_);
+        UniqueFd fdGuard(fd_);   // 接管,析构走 fdsan_close_with_tag
         fd_ = INVALID_FD;
         MIDI_DEBUG_LOG("%{public}s close fd done", name_.c_str());
     }
@@ -376,31 +376,30 @@ MidiSharedRing *MidiSharedRing::Unmarshalling(Parcel &parcel)
 
     int minfd = MINFD; // ignore stdout, stdin and stderr.
     CHECK_AND_RETURN_RET_LOG(dataFd > minfd, nullptr, "invalid dataFd: %{public}d", dataFd);
+    // 接管 dataFd 生命周期:所有退出路径由 guard 析构走 fdsan_close_with_tag
+    UniqueFd dataFdGuard(dataFd);
 
     std::shared_ptr<UniqueFd> notifyFd;
     if (hasNotifyFd) {
         int eventFd = messageParcel.ReadFileDescriptor();
         if (eventFd <= minfd) {
             MIDI_ERR_LOG("invalid eventFd: %{public}d", eventFd);
-            CloseFd(dataFd);
             return nullptr;
         }
         notifyFd = std::make_shared<UniqueFd>(eventFd);
     }
 
     auto buffer = new (std::nothrow) MidiSharedRing(ringSize, notifyFd);
-    if (buffer == nullptr || buffer->Init(dataFd) != OH_MIDI_STATUS_OK) {
+    if (buffer == nullptr || buffer->Init(dataFdGuard.Get()) != OH_MIDI_STATUS_OK) {
         MIDI_ERR_LOG("failed to init.");
         if (buffer != nullptr)
             delete buffer;
-        CloseFd(dataFd);
         return nullptr;
     }
 
     if (ringSize != buffer->capacity_) {
         MIDI_WARNING_LOG("data in shared memory wrong");
     }
-    CloseFd(dataFd);
     MIDI_DEBUG_LOG("ReadFromParcel done.");
     return buffer;
 }
