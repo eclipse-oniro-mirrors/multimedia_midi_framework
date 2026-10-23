@@ -71,7 +71,6 @@ inline uint8_t GetSysexStatus(uint32_t pktIndex, uint32_t totalPkts)
     return SYSEX7_CONTINUE;
 }
 
-void CloseFd(int fd);
 std::string GetEncryptStr(const std::string &str);
 std::string BytesToString(uint32_t value);
 std::string DumpOneEvent(uint64_t ts, size_t len, const uint32_t *data);

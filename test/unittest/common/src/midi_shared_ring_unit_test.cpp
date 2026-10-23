@@ -1690,7 +1690,7 @@ HWTEST_F(MidiSharedRingUnitTest, MidiSharedRingMemoryAndFlushBranches_001, TestS
     ASSERT_TRUE(mismatchedSizeParcel.WriteFileDescriptor(fd));
     ASSERT_TRUE(mismatchedSizeParcel.WriteUint64(64));
     EXPECT_EQ(nullptr, MidiSharedMemory::Unmarshalling(mismatchedSizeParcel));
-    CloseFd(fd);
+    close(fd);
 
     MidiSharedRing badRemote(256);
     EXPECT_EQ(OH_MIDI_STATUS_SYSTEM_ERROR, badRemote.Init(0));

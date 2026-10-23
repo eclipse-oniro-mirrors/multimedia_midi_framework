@@ -2,7 +2,6 @@
 1.0 {
   global:
     extern "C++" {
-      OHOS::MIDI::CloseFd*;
       OHOS::MIDI::UniqueFd::UniqueFd*;
       OHOS::MIDI::UniqueFd::~UniqueFd*;
       OHOS::MIDI::UniqueFd::operator=*;
