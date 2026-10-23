@@ -58,17 +58,6 @@ int64_t ClockTime::GetCurNano()
 }
 
 // utils //
-void CloseFd(int fd)
-{
-    // log stdin, stdout, stderr.
-    if (fd == STDIN_FILENO || fd == STDOUT_FILENO || fd == STDERR_FILENO) {
-        MIDI_WARNING_LOG("special fd: %{public}d will be closed", fd);
-    }
-    int tmpFd = fd;
-    UniqueFd fdGuard(fd);   // 接管,析构走 fdsan_close_with_tag
-    MIDI_DEBUG_LOG("fd: %{public}d closed successfuly!", tmpFd);
-}
-
 std::string GetEncryptStr(const std::string &src)
 {
     if (src.empty()) {
