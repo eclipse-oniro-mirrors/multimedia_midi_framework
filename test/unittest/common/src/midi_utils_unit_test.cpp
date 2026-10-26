@@ -137,24 +137,24 @@ HWTEST_F(MidiUtilsUnitTest, PackAndObjectBranches001, TestSize.Level0)
 }
 
 /**
- * @tc.name: CloseFdBranches001
- * @tc.desc: Verify all standard-descriptor warnings and the normal descriptor path while restoring test IO.
+ * @tc.name: UniqueFdCloseBranches001
+ * @tc.desc: Verify UniqueFd adopts and fdsan-binds on construction and closes via fdsan_close_with_tag on
+ *           destruction; an empty UniqueFd stays valid-inert.
  * @tc.type: FUNC
  */
-HWTEST_F(MidiUtilsUnitTest, CloseFdBranches001, TestSize.Level0)
+HWTEST_F(MidiUtilsUnitTest, UniqueFdCloseBranches001, TestSize.Level0)
 {
-    for (int fd : {STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO}) {
-        int savedFd = dup(fd);
-        ASSERT_GE(savedFd, 0);
-        CloseFd(fd);
-        ASSERT_EQ(dup2(savedFd, fd), fd);
-        close(savedFd);
-    }
+    UniqueFd emptyFd;
+    EXPECT_FALSE(emptyFd.Valid());
 
     int normalFd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     ASSERT_GE(normalFd, 0);
-    CloseFd(normalFd);
-    EXPECT_EQ(close(normalFd), -1);
+    {
+        UniqueFd fdGuard(normalFd); // 构造即接管并绑定 fdsan owner tag
+        EXPECT_TRUE(fdGuard.Valid());
+        EXPECT_EQ(fdGuard.Get(), normalFd);
+    } // 析构走 fdsan_close_with_tag 关闭
+    EXPECT_EQ(close(normalFd), -1); // 已被 UniqueFd 关闭
 }
 
 } // namespace MIDI

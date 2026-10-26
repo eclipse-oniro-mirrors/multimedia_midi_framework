@@ -97,35 +97,38 @@ private:
     void Close();
 
     uint8_t *base_;
-    int fd_;
+    UniqueFd fd_; // 持有期全程绑定 fdsan owner tag,析构/Reset 走 fdsan_close_with_tag
     size_t size_;
     std::string name_;
 };
 
 class ScopedFd {
 public:
-    explicit ScopedFd(int fd) : fd_(fd) {}
-    ~ScopedFd()
+    explicit ScopedFd(int fd)
     {
-        if (fd_ > MINFD) {
-            CloseFd(fd_);
+        if (fd > MINFD) {
+            fd_.Reset(fd); // 接收即绑定 fdsan owner tag,析构自动 fdsan_close_with_tag
         }
     }
 
 private:
-    int fd_ = -1;
+    UniqueFd fd_;
 };
 
 MidiSharedMemoryImpl::MidiSharedMemoryImpl(size_t size, const std::string &name)
-    : base_(nullptr), fd_(INVALID_FD), size_(size), name_(name)
+    : base_(nullptr), size_(size), name_(name)
 {
     MIDI_DEBUG_LOG("MidiSharedMemory ctor with size: %{public}zu name: %{public}s", size_, name_.c_str());
 }
 
 MidiSharedMemoryImpl::MidiSharedMemoryImpl(int fd, size_t size, const std::string &name)
-    : base_(nullptr), fd_(dup(fd)), size_(size), name_(name)
+    : base_(nullptr), size_(size), name_(name)
 {
-    MIDI_DEBUG_LOG("MidiSharedMemory ctor with fd %{public}d size %{public}zu name %{public}s", fd_, size_,
+    int dupFd = dup(fd);
+    if (dupFd >= 0) {
+        fd_.Reset(dupFd); // 接收(dup 副本)即绑定 fdsan owner tag,持有期保持
+    }
+    MIDI_DEBUG_LOG("MidiSharedMemory ctor with fd %{public}d size %{public}zu name %{public}s", dupFd, size_,
                    name_.c_str());
 }
 
@@ -140,26 +143,28 @@ int32_t MidiSharedMemoryImpl::Init()
     CHECK_AND_RETURN_RET_LOG((size_ > 0 && size_ < MAX_MMAP_BUFFER_SIZE), OH_MIDI_STATUS_GENERIC_INVALID_ARGUMENT,
                              "Init falied: size out of range: %{public}zu", size_);
     bool isFromRemote = false;
-    if (fd_ >= 0) {
-        if (fd_ == STDIN_FILENO || fd_ == STDOUT_FILENO || fd_ == STDERR_FILENO) {
-            MIDI_WARNING_LOG("fd is special fd: %{public}d", fd_);
+    if (fd_.Valid()) {
+        int curFd = fd_.Get();
+        if (curFd == STDIN_FILENO || curFd == STDOUT_FILENO || curFd == STDERR_FILENO) {
+            MIDI_WARNING_LOG("fd is special fd: %{public}d", curFd);
         }
         isFromRemote = true;
-        int size = AshmemGetSize(fd_); // hdi fd may not support
+        int size = AshmemGetSize(curFd); // hdi fd may not support
         if (size < 0 || static_cast<size_t>(size) != size_) {
             MIDI_WARNING_LOG("AshmemGetSize faied, get %{public}d", size);
         }
     } else {
-        fd_ = AshmemCreate(name_.c_str(), size_);
-        if (fd_ == STDIN_FILENO || fd_ == STDOUT_FILENO || fd_ == STDERR_FILENO) {
-            MIDI_WARNING_LOG("fd is special fd: %{public}d", fd_);
+        int newFd = AshmemCreate(name_.c_str(), size_);
+        if (newFd == STDIN_FILENO || newFd == STDOUT_FILENO || newFd == STDERR_FILENO) {
+            MIDI_WARNING_LOG("fd is special fd: %{public}d", newFd);
         }
-        CHECK_AND_RETURN_RET_LOG((fd_ >= 0), OH_MIDI_STATUS_SYSTEM_ERROR, "Init falied: fd %{public}d", fd_);
+        CHECK_AND_RETURN_RET_LOG((newFd >= 0), OH_MIDI_STATUS_SYSTEM_ERROR, "Init falied: fd %{public}d", newFd);
+        fd_.Reset(newFd); // 创建即绑定 fdsan owner tag,持有期保持
     }
 
-    void *addr = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_, 0);
+    void *addr = mmap(nullptr, size_, PROT_READ | PROT_WRITE, MAP_SHARED, fd_.Get(), 0);
     CHECK_AND_RETURN_RET_LOG(addr != MAP_FAILED, OH_MIDI_STATUS_SYSTEM_ERROR,
-                             "Init falied: fd %{public}d size %{public}zu", fd_, size_);
+                             "Init falied: fd %{public}d size %{public}zu", fd_.Get(), size_);
     base_ = static_cast<uint8_t *>(addr);
     MIDI_DEBUG_LOG("Init %{public}s <%{public}s> done.", (isFromRemote ? "remote" : "local"), name_.c_str());
     return OH_MIDI_STATUS_OK;
@@ -170,7 +175,7 @@ bool MidiSharedMemoryImpl::Marshalling(Parcel &parcel) const
     // Parcel -> MessageParcel
     MessageParcel &msgParcel = static_cast<MessageParcel &>(parcel);
     CHECK_AND_RETURN_RET_LOG((size_ > 0 && size_ < MAX_MMAP_BUFFER_SIZE), false, "invalid size: %{public}zu", size_);
-    return msgParcel.WriteFileDescriptor(fd_) && msgParcel.WriteUint64(static_cast<uint64_t>(size_)) &&
+    return msgParcel.WriteFileDescriptor(fd_.Get()) && msgParcel.WriteUint64(static_cast<uint64_t>(size_)) &&
            msgParcel.WriteString(name_);
 }
 
@@ -183,9 +188,8 @@ void MidiSharedMemoryImpl::Close()
         MIDI_DEBUG_LOG("%{public}s munmap done", name_.c_str());
     }
 
-    if (fd_ >= 0) {
-        (void)CloseFd(fd_);
-        fd_ = INVALID_FD;
+    if (fd_.Valid()) {
+        fd_.Reset(); // 内部走 fdsan_close_with_tag 关闭
         MIDI_DEBUG_LOG("%{public}s close fd done", name_.c_str());
     }
 }
@@ -196,7 +200,7 @@ size_t MidiSharedMemoryImpl::GetSize() const { return size_; }
 
 std::string MidiSharedMemoryImpl::GetName() const { return name_; }
 
-int MidiSharedMemoryImpl::GetFd() const { return fd_; }
+int MidiSharedMemoryImpl::GetFd() const { return fd_.Get(); }
 
 std::shared_ptr<MidiSharedMemory> MidiSharedMemory::CreateFromLocal(size_t size, const std::string &name)
 {
@@ -376,31 +380,30 @@ MidiSharedRing *MidiSharedRing::Unmarshalling(Parcel &parcel)
 
     int minfd = MINFD; // ignore stdout, stdin and stderr.
     CHECK_AND_RETURN_RET_LOG(dataFd > minfd, nullptr, "invalid dataFd: %{public}d", dataFd);
+    // 接收即接管 dataFd:所有退出路径由 guard 析构走 fdsan_close_with_tag
+    UniqueFd dataFdGuard(dataFd);
 
     std::shared_ptr<UniqueFd> notifyFd;
     if (hasNotifyFd) {
         int eventFd = messageParcel.ReadFileDescriptor();
         if (eventFd <= minfd) {
             MIDI_ERR_LOG("invalid eventFd: %{public}d", eventFd);
-            CloseFd(dataFd);
             return nullptr;
         }
         notifyFd = std::make_shared<UniqueFd>(eventFd);
     }
 
     auto buffer = new (std::nothrow) MidiSharedRing(ringSize, notifyFd);
-    if (buffer == nullptr || buffer->Init(dataFd) != OH_MIDI_STATUS_OK) {
+    if (buffer == nullptr || buffer->Init(dataFdGuard.Get()) != OH_MIDI_STATUS_OK) {
         MIDI_ERR_LOG("failed to init.");
         if (buffer != nullptr)
             delete buffer;
-        CloseFd(dataFd);
         return nullptr;
     }
 
     if (ringSize != buffer->capacity_) {
         MIDI_WARNING_LOG("data in shared memory wrong");
     }
-    CloseFd(dataFd);
     MIDI_DEBUG_LOG("ReadFromParcel done.");
     return buffer;
 }
